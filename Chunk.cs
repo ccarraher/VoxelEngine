@@ -5,26 +5,25 @@ namespace Voxels
 {
     public class Chunk
     {
-        public Vector3 _position { get; set; } = Vector3.Zero;
-
         public BlockData.BlockType[] _blocks = new BlockData.BlockType[ChunkData.GenerationSize * ChunkData.GenerationSize * ChunkData.GenerationHeight];
         public List<float> _vertices = new List<float>();
+        public Vector2i Position { get; set; } = Vector2i.Zero;
+        public bool NeedsToBeGenerated = true;
+        public bool NeedsToBeMeshed = true;
 
         private int _vaoHandle = 0;
         private int _vboHandle = 0;
 
-        public void Generate(FastNoiseLite noise, Vector2i position)
+        public void Generate(FastNoiseLite noise)
         {
-            _position = new Vector3(position.X, 0.0f, position.Y);
-
             // Generate terrain for the full area including padding
             for (int x = 0; x < ChunkData.GenerationSize; x++)
             {
                 for (int z = 0; z < ChunkData.GenerationSize; z++)
                 {
                     // Convert to world coordinates correctly
-                    int worldX = position.X * ChunkData.Size + (x - 1);  // Subtract 1 for padding
-                    int worldZ = position.Y * ChunkData.Size + (z - 1);  // Subtract 1 for padding
+                    int worldX = Position.X * ChunkData.Size + (x - 1);  // Subtract 1 for padding
+                    int worldZ = Position.Y * ChunkData.Size + (z - 1);  // Subtract 1 for padding
 
                     float height = (noise.GetNoise((float)worldX, (float)worldZ) + 1) * (ChunkData.GenerationHeight / 16);
 
@@ -106,9 +105,9 @@ namespace Voxels
 
             vertices.ForEach(vertex =>
             {
-                _vertices.Add(vertex.X + x  + _position.X * ChunkData.Size);
+                _vertices.Add(vertex.X + x  + Position.X * ChunkData.Size);
                 _vertices.Add(vertex.Y + y);
-                _vertices.Add(vertex.Z + z + _position.Z * ChunkData.Size);
+                _vertices.Add(vertex.Z + z + Position.Y * ChunkData.Size);
 
                 _vertices.Add(color.X);
                 _vertices.Add(color.Y); 
@@ -156,6 +155,9 @@ namespace Voxels
         public void Clear()
         {
             Array.Clear(_blocks, 0, _blocks.Length);
+            _vertices.Clear();
+            NeedsToBeMeshed = true;
+            NeedsToBeGenerated = true;
         }
     }
 }

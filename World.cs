@@ -1,18 +1,16 @@
 ﻿using OpenTK.Mathematics;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 
 namespace Voxels
 {
     public class World
     {
-        public int ViewDistance { get; private set; } = 24;
+        public int ViewDistance { get; private set; } = 16;
 
-        private Dictionary<Vector2i, Chunk> _chunks = new Dictionary<Vector2i, Chunk>();
-        private Queue<Chunk> _chunkPool = new Queue<Chunk>();
-        //private readonly ConcurrentQueue<(Vector2i pos, Chunk chunk)> _completedChunks = new();
-        //private readonly ConcurrentDictionary<Vector2i, byte> _pendingChunks = new();
-        private FastNoiseLite _noise = new FastNoiseLite();
+        private readonly ConcurrentDictionary<Vector2i, Chunk> _chunksToRender = new ConcurrentDictionary<Vector2i, Chunk>();
+        private readonly Queue<Chunk> _chunkPool = new Queue<Chunk>();
+        private readonly ConcurrentQueue<Chunk> _chunksToGenerate = new();
+        private FastNoiseLite _noise = new FastNoiseLite(); 
 
         public void Init()
         {
@@ -21,7 +19,7 @@ namespace Voxels
             _noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2S);
             _noise.SetFractalOctaves(8);
 
-            for (int i = 0; i < 1000; i++)
+            for (int i = 0; i < 250; i++)
             {
                 _chunkPool.Enqueue(new Chunk());
             }
@@ -40,7 +38,7 @@ namespace Voxels
 
             UnloadOutOfRangeChunks(startX, endX, startZ, endZ);
 
-            if (!_chunks.ContainsKey(new Vector2i(playerChunkPosX, playerChunkPosZ)))
+            if (!_chunksToRender.ContainsKey(new Vector2i(playerChunkPosX, playerChunkPosZ)))
             {
                 LoadChunk(playerChunkPosX, playerChunkPosZ);
             }
@@ -54,62 +52,48 @@ namespace Voxels
                         int chunkPosX = x + playerChunkPosX;
                         int chunkPosZ = z + playerChunkPosZ;
 
-                        if (!_chunks.ContainsKey(new Vector2i(chunkPosX, chunkPosZ)))
+                        if (!_chunksToRender.ContainsKey(new Vector2i(chunkPosX, chunkPosZ)))
                         {
                             LoadChunk(chunkPosX, chunkPosZ);
-                            break;
+                            //break;
                         }
                     }
                 }
             }
 
-            //ProcessCompletedChunks();
+            Parallel.ForEach(_chunksToGenerate, chunk =>
+            {
+                chunk.Generate(_noise);
+                _chunksToRender.TryAdd(chunk.Position, chunk);
+                _chunksToGenerate.TryDequeue(out _);
+            });
+
+            foreach (var chunk in _chunksToRender.Values)
+            {
+                if (chunk.NeedsToBeMeshed)
+                {
+                    chunk.GenerateMesh();
+                    chunk.UploadMesh();
+                    chunk.NeedsToBeMeshed = false;
+                }
+            }
         }
 
         public void LoadChunk(int x, int z)
         {
             var chunkPos = new Vector2i(x, z);
 
-            //if (!_pendingChunks.TryAdd(chunkPos, 0))
-            //{
-            //    return;
-            //}
-
             Chunk chunk = _chunkPool.Count > 0 ? _chunkPool.Dequeue() : new Chunk();
+            chunk.Position = chunkPos;
 
-            //var task = Task.Run(() =>
-            //{
-            //    chunk.Generate(_noise, chunkPos);
-            //    _completedChunks.Enqueue((chunkPos, chunk));
-            //    _pendingChunks.Remove(chunkPos, out var _);
-            //});
-
-            //task.Wait(1);
-            //if (task.IsCompleted)
-            //{
-            chunk.Generate(_noise, chunkPos);
-            chunk.GenerateMesh();
-            chunk.UploadMesh();
-            _chunks.Add(chunkPos, chunk);
-            //}
+            _chunksToGenerate.Enqueue(chunk);
 
             //Console.WriteLine($"Chunk generated at position ({x}, {z})");
         }
 
-        //public void ProcessCompletedChunks()
-        //{
-        //    while (_completedChunks.TryDequeue(out var chunkData))
-        //    {
-        //        var (pos, chunk) = chunkData;
-        //        chunk.GenerateMesh();
-        //        chunk.UploadMesh();
-        //        _chunks.TryAdd(pos, chunk);
-        //    }
-        //}
-
         public void UnloadOutOfRangeChunks(int startX, int endX, int startZ, int endZ)
         {
-            foreach (var chunk in _chunks)
+            foreach (var chunk in _chunksToRender)
             {
                 Vector2i pos = chunk.Key;
 
@@ -117,14 +101,14 @@ namespace Voxels
                 {
                     chunk.Value.Clear();
                     _chunkPool.Enqueue(chunk.Value);
-                    //_chunks.Remove(pos);
+                    _chunksToRender.Remove(pos, out var _);
                 }
             }
         }
 
         public void Render()
         {
-            foreach (var chunk in _chunks)
+            foreach (var chunk in _chunksToRender)
             {
                 chunk.Value.Render();
             }

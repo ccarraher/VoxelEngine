@@ -15,6 +15,7 @@ namespace Voxels
 
         private readonly int _width;
         private readonly int _height;
+        private int _frameCount;
 
         private static DebugProc DebugMessageDelegate = OnDebugMessage;
 
@@ -40,6 +41,7 @@ namespace Voxels
 
             //GL.Enable(EnableCap.DepthTest);
             //GL.DebugMessageCallback(DebugMessageDelegate, IntPtr.Zero);
+            VSync = VSyncMode.Adaptive;
             GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
             GL.ClearColor(new Color4(0.2f, 0.3f, 0.3f, 1.0f));
             GL.Enable(EnableCap.DepthTest);
@@ -52,9 +54,16 @@ namespace Voxels
         {
             base.OnUpdateFrame(e);
 
-            _camera.Update((float)e.Time, _player.Position, MousePosition);
             _player.Update((float)e.Time, _camera.Front, KeyboardState);
+            _camera.Update((float)e.Time, _player.Position, MousePosition);
             _world.Update(_player.Position);
+
+            _frameCount++;
+            if (_frameCount == 100)
+            {
+                Console.WriteLine($"{UpdateTime}s");
+                _frameCount = 0;
+            }
         }
 
         protected override void OnRenderFrame(FrameEventArgs e)

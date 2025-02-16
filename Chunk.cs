@@ -5,17 +5,19 @@ namespace Voxels
 {
     public class Chunk
     {
-        public Vector3 _position { get; set; } = Vector3.Zero;
+        public Vector2i? Position { get; set; } = Vector2i.Zero;
 
         public BlockData.BlockType[] _blocks = new BlockData.BlockType[ChunkData.GenerationSize * ChunkData.GenerationSize * ChunkData.GenerationHeight];
         public List<float> _vertices = new List<float>();
+
+        public bool IsLoaded { get; set; } = false;
 
         private int _vaoHandle = 0;
         private int _vboHandle = 0;
 
         public void Generate(FastNoiseLite noise, Vector2i position)
         {
-            _position = new Vector3(position.X, 0.0f, position.Y);
+            Position = position;
 
             // Generate terrain for the full area including padding
             for (int x = 0; x < ChunkData.GenerationSize; x++)
@@ -100,15 +102,20 @@ namespace Voxels
 
         public void AddFace(int x, int y, int z, BlockData.BlockFace blockFace, BlockData.BlockType blockType)
         {
+            if (Position is null)
+            {
+                return;
+            }
+
             List<Vector3> vertices = BlockData.BlockFaceVerticesLookup[blockFace];
 
             Vector3 color = BlockData.BlockTypeColorLookup[blockType];
 
             vertices.ForEach(vertex =>
             {
-                _vertices.Add(vertex.X + x  + _position.X * ChunkData.Size);
+                _vertices.Add(vertex.X + x  + Position.Value.X * ChunkData.Size);
                 _vertices.Add(vertex.Y + y);
-                _vertices.Add(vertex.Z + z + _position.Z * ChunkData.Size);
+                _vertices.Add(vertex.Z + z + Position.Value.Y * ChunkData.Size);
 
                 _vertices.Add(color.X);
                 _vertices.Add(color.Y); 
@@ -139,6 +146,8 @@ namespace Voxels
 
             GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
             GL.BindVertexArray(0);
+
+            IsLoaded = true;
         }
 
         public void Render()
@@ -156,6 +165,8 @@ namespace Voxels
         public void Clear()
         {
             Array.Clear(_blocks, 0, _blocks.Length);
+            _vertices.Clear();
+            IsLoaded = false;
         }
     }
 }

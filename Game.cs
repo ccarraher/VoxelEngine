@@ -16,6 +16,8 @@ namespace Voxels
         private readonly int _width;
         private readonly int _height;
 
+        private int _frameCounter = 0;
+
         private static DebugProc DebugMessageDelegate = OnDebugMessage;
 
         public Game(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings, int width, int height)
@@ -52,9 +54,16 @@ namespace Voxels
         {
             base.OnUpdateFrame(e);
 
-            _camera.Update((float)e.Time, _player.Position, MousePosition);
             _player.Update((float)e.Time, _camera.Front, KeyboardState);
+            _camera.Update((float)e.Time, _player.Position, MousePosition);
             _world.Update(_player.Position);
+
+            _frameCounter++;
+            if (_frameCounter == 100)
+            {
+                Console.WriteLine($"{UpdateTime.ToString()}s");
+                _frameCounter = 0;
+            }
         }
 
         protected override void OnRenderFrame(FrameEventArgs e)

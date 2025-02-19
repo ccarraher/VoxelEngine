@@ -12,7 +12,7 @@ namespace Voxels
         private Vector3 _right = new (0.0f, 0.0f, 0.0f);
         private Vector3 _up = new (0.0f, 1.0f, 0.0f);
 
-        private float _movementSpeed = 8.5f;
+        private float _movementSpeed = 100.0f;
 
         private int _vboHandle = 0;
         private int _vaoHandle = 0;

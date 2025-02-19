@@ -10,7 +10,7 @@ namespace Voxels
         private readonly ConcurrentDictionary<Vector2i, Chunk> _chunksToRender = new ConcurrentDictionary<Vector2i, Chunk>();
         private readonly Queue<Chunk> _chunkPool = new Queue<Chunk>();
         private readonly ConcurrentQueue<Chunk> _chunksToGenerate = new();
-        private FastNoiseLite _noise = new FastNoiseLite(); 
+        private FastNoiseLite _noise = new FastNoiseLite();
 
         public void Init()
         {
@@ -38,12 +38,7 @@ namespace Voxels
 
             UnloadOutOfRangeChunks(startX, endX, startZ, endZ);
 
-            if (!_chunksToRender.ContainsKey(new Vector2i(playerChunkPosX, playerChunkPosZ)))
-            {
-                LoadChunk(playerChunkPosX, playerChunkPosZ);
-            }
-
-            for (int d = 1; d < ViewDistance; d++)
+            for (int d = 0; d < ViewDistance; d++)
             {
                 for (int x = -d; x <= d; x++)
                 {
@@ -106,27 +101,19 @@ namespace Voxels
             }
         }
 
-        public void Render()
+        public void Render(Camera camera)
         {
+            int renderedCount = 0;
+
             foreach (var chunk in _chunksToRender)
             {
-                chunk.Value.Render();
+                if (camera.BoundingBoxInFrustum(Chunk.GetBoundingBox(chunk.Key.X, chunk.Key.Y)))
+                {
+                    renderedCount++;
+                    chunk.Value.Render();
+                }
             }
-        }
-
-        public int GetChunkIndex(int x, int z)
-        {
-            if (x < 0)
-            {
-                x = x + WorldData.MaxChunks;
-            }
-
-            if (z < 0)
-            {
-                z = z + WorldData.MaxChunks;
-            }
-
-            return z * WorldData.MaxChunks + x;
+            Console.WriteLine($"{renderedCount} out of {_chunksToRender.Count} rendered");
         }
     }
 }

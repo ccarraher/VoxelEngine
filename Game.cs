@@ -58,12 +58,12 @@ namespace Voxels
             _camera.Update((float)e.Time, _player.Position, MousePosition);
             _world.Update(_player.Position);
 
-            _frameCount++;
-            if (_frameCount == 100)
-            {
-                Console.WriteLine($"{UpdateTime}s");
-                _frameCount = 0;
-            }
+            //_frameCount++;
+            //if (_frameCount == 100)
+            //{
+            //    Console.WriteLine($"{UpdateTime}s");
+            //    _frameCount = 0;
+            //}
         }
 
         protected override void OnRenderFrame(FrameEventArgs e)
@@ -84,10 +84,10 @@ namespace Voxels
 
             _player.Render();
 
-            Matrix4.CreateTranslation(0.0f, -ChunkData.Height / 2, 0.0f, out var worldModel);
+            Matrix4.CreateTranslation(0.0f, 0.0f, 0.0f, out var worldModel);
             _shader.SetMatrix4("model", worldModel);
 
-            _world.Render();
+            _world.Render(_camera);
 
             SwapBuffers();
         }

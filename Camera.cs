@@ -1,5 +1,4 @@
 ﻿using OpenTK.Mathematics;
-using System;
 
 namespace Voxels
 {
@@ -17,6 +16,8 @@ namespace Voxels
         private Vector3 _up = Vector3.UnitY;
         private Vector3 _right = Vector3.UnitX;
 
+        private Plane[] FrustumPlanes = new Plane[6];
+
         private readonly int _width;
         private readonly int _height;
 
@@ -31,6 +32,7 @@ namespace Voxels
         {
             ProcessMouseMovement(mousePosition);
             UpdateCameraVectors(playerPosition);
+            UpdateFrustum();
         }
 
         public Matrix4 GetViewMatrix()
@@ -41,6 +43,27 @@ namespace Voxels
         public Matrix4 GetProjectionMatrix()
         {
             return Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(_fov), _width / _height, 0.1f, 1000f);
+        }
+
+        public bool BoundingBoxInFrustum(BoundingBox box)
+        {
+            foreach (var plane in FrustumPlanes)
+            {
+                // Check if the AABB is fully outside the frustum for this plane
+                Vector3 absNormal = new Vector3(MathF.Abs(plane.Normal.X), MathF.Abs(plane.Normal.Y), MathF.Abs(plane.Normal.Z));
+
+                float distance = plane.DistanceTo(box.Center);  // Distance to the AABB's center
+                float projection = box.Extents.X * absNormal.X + box.Extents.Y * absNormal.Y + box.Extents.Z * absNormal.Z;
+
+                // If the distance to the center is negative, the box is outside the frustum.
+                // If the absolute projection distance is greater than the distance to the plane, it's outside.
+                if (distance + projection < 0)
+                {
+                    return false; // AABB is outside the frustum for this plane
+                }
+            }
+
+            return true; // The box is either inside or intersecting the frustum
         }
 
         private void ProcessMouseMovement(Vector2 mousePosition)
@@ -79,6 +102,36 @@ namespace Voxels
 
             _right = Vector3.Normalize(Vector3.Cross(Front, Vector3.UnitY));  // normalize the vectors, because their length gets closer to 0 the more you look up or down which results in slower movement.
             _up = Vector3.Normalize(Vector3.Cross(_right, Front));
+        }
+
+        private void UpdateFrustum()
+        {
+            Matrix4 vp = GetViewMatrix() * GetProjectionMatrix();
+
+            // Extract planes from view-projection matrix=
+            // Left plane
+            FrustumPlanes[1] = new Plane(new Vector4(
+                vp.M14 + vp.M11, vp.M24 + vp.M21, vp.M34 + vp.M31, vp.M44 + vp.M41));
+
+            // Right plane
+            FrustumPlanes[0] = new Plane(new Vector4(
+                vp.M14 - vp.M11, vp.M24 - vp.M21, vp.M34 - vp.M31, vp.M44 - vp.M41));
+
+            // Bottom plane
+            FrustumPlanes[2] = new Plane(new Vector4(
+                vp.M14 + vp.M12, vp.M24 + vp.M22, vp.M34 + vp.M32, vp.M44 + vp.M42));
+
+            // Top plane
+            FrustumPlanes[3] = new Plane(new Vector4(
+                vp.M14 - vp.M12, vp.M24 - vp.M22, vp.M34 - vp.M32, vp.M44 - vp.M42));
+
+            // Near plane
+            FrustumPlanes[4] = new Plane(new Vector4(
+                vp.M13, vp.M23, vp.M33, vp.M43));
+
+            // Far plane
+            FrustumPlanes[5] = new Plane(new Vector4(
+                vp.M14 - vp.M13, vp.M24 - vp.M23, vp.M34 - vp.M33, vp.M44 - vp.M43));
         }
     }
 }

@@ -159,5 +159,25 @@ namespace Voxels
             NeedsToBeMeshed = true;
             NeedsToBeGenerated = true;
         }
+
+        public static BoundingBox GetBoundingBox(int chunkPosX, int chunkPosZ)
+        {
+            float worldMinX = chunkPosX * ChunkData.Size;
+            float worldMinZ = chunkPosZ * ChunkData.Size;
+
+            Vector3 center = new Vector3(
+                worldMinX + ChunkData.Size / 2f,
+                0,
+                worldMinZ + ChunkData.Size / 2f
+            );
+
+            Vector3 extents = new Vector3(
+                ChunkData.Size / 2f,
+                ChunkData.Height / 2f,
+                ChunkData.Size / 2f
+            );
+
+            return new BoundingBox(center, extents);
+        }
     }
 }

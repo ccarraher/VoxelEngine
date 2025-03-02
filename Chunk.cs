@@ -1,39 +1,56 @@
-﻿using OpenTK.Graphics.OpenGL4;
-using OpenTK.Mathematics;
+﻿using OpenTK.Mathematics;
+using static Voxels.BlockData;
 
 namespace Voxels
 {
     public class Chunk
     {
         public BlockData.BlockType[] _blocks = new BlockData.BlockType[ChunkData.GenerationSize * ChunkData.GenerationSize * ChunkData.GenerationHeight];
-        public List<float> _vertices = new List<float>();
-        public Vector2i Position { get; set; } = Vector2i.Zero;
+
+        private Vector2i _position = Vector2i.Zero;
+        public Vector2i Position 
+        { 
+            get => _position; 
+            set 
+            {
+                _position = value;
+                CalculateBoundBox(value);
+            } 
+        }
+
+        private BoundingBox _boundingBox = new BoundingBox();
+        public BoundingBox BoundingBox => _boundingBox;
+
         public bool NeedsToBeGenerated = true;
         public bool NeedsToBeMeshed = true;
 
-        private int _vaoHandle = 0;
-        private int _vboHandle = 0;
+        private BlockMesh _mesh = new BlockMesh();
+        private List<ChunkVertex> _vertices = new List<ChunkVertex>();
+
+        private int _vertexCount = 0;
 
         public void Generate(FastNoiseLite noise)
         {
-            // Generate terrain for the full area including padding
             for (int x = 0; x < ChunkData.GenerationSize; x++)
             {
                 for (int z = 0; z < ChunkData.GenerationSize; z++)
                 {
-                    // Convert to world coordinates correctly
-                    int worldX = Position.X * ChunkData.Size + (x - 1);  // Subtract 1 for padding
-                    int worldZ = Position.Y * ChunkData.Size + (z - 1);  // Subtract 1 for padding
+                    int worldX = Position.X * ChunkData.Size + (x - 1);
+                    int worldZ = Position.Y * ChunkData.Size + (z - 1);
 
-                    float height = (noise.GetNoise((float)worldX, (float)worldZ) + 1) * (ChunkData.GenerationHeight / 16);
+                    var height = GetHeight(noise, worldX, worldZ);
 
                     for (int y = 0; y < ChunkData.GenerationHeight; ++y)
                     {
                         int index = GetBlockAt(x, y, z);
 
-                        if (y - 1 < height)  // Subtract 1 for padding
+                        if (y - 1 < height)
                         {
                             _blocks[index] = BlockData.BlockType.Dirt;
+                        }
+                        else if (y == 32)
+                        {
+                            _blocks[index] = BlockData.BlockType.Water;
                         }
                         else
                         {
@@ -48,7 +65,6 @@ namespace Voxels
         {
             _vertices.Clear();
 
-            // Generate faces for the main chunk area (excluding padding)
             for (int x = 1; x < ChunkData.GenerationSize - 1; x++)
             {
                 for (int y = 1; y < ChunkData.GenerationHeight - 1; y++)
@@ -63,10 +79,10 @@ namespace Voxels
                             continue;
                         }
 
-                        // Convert from padded coordinates to chunk-local coordinates when adding faces
                         int localX = x - 1;
                         int localY = y - 1;
                         int localZ = z - 1;
+
 
                         if (_blocks[GetBlockAt(x - 1, y, z)] == BlockData.BlockType.Air)
                         {
@@ -100,51 +116,268 @@ namespace Voxels
         public void AddFace(int x, int y, int z, BlockData.BlockFace blockFace, BlockData.BlockType blockType)
         {
             List<Vector3> vertices = BlockData.BlockFaceVerticesLookup[blockFace];
-
-            Vector3 color = BlockData.BlockTypeColorLookup[blockType];
-
-            vertices.ForEach(vertex =>
+            for (int i = 0; i < vertices.Count; i++)
             {
-                _vertices.Add(vertex.X + x  + Position.X * ChunkData.Size);
-                _vertices.Add(vertex.Y + y);
-                _vertices.Add(vertex.Z + z + Position.Y * ChunkData.Size);
+                var worldPosition = new Vector3(
+                    vertices[i].X + x + Position.X * ChunkData.Size,
+                    vertices[i].Y + y,
+                    vertices[i].Z + z + Position.Y * ChunkData.Size
+                );
 
-                _vertices.Add(color.X);
-                _vertices.Add(color.Y); 
-                _vertices.Add(color.Z);
-            });
+                float ao = CalculateAoForEachFaceVertex(x, y, z, blockFace, i);
+
+                ChunkVertex vertex = new ChunkVertex(worldPosition, (int)blockFace, (int)blockType, ao);
+                _vertices.Add(vertex);
+            }
         }
 
-        public void UploadMesh()
+        private float CalculateAoForEachFaceVertex(int x, int y, int z, BlockData.BlockFace blockFace, int vertexIndex)
         {
-            if (_vboHandle == 0)
+            int localX = x + 1;
+            int localY = y + 1;
+            int localZ = z + 1;
+
+            switch (blockFace)
             {
-                _vboHandle = GL.GenBuffer();
-            }
-            GL.BindBuffer(BufferTarget.ArrayBuffer, _vboHandle);
-            GL.BufferData(BufferTarget.ArrayBuffer, _vertices.Count() * sizeof(float), _vertices.ToArray(), BufferUsageHint.StaticDraw);
+                case BlockData.BlockFace.Front: // -Z face
+                    switch (vertexIndex)
+                    {
+                        case 0: // Bottom-left
+                        case 5:
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX - 1, localY, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY - 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX, localY - 1, localZ - 1)] != BlockData.BlockType.Air
+                            );
+                        case 1: // Bottom-right
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX, localY - 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY - 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY, localZ - 1)] != BlockData.BlockType.Air
+                            );
+                        case 2:
+                        case 3: // Top-right
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX + 1, localY, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY + 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX, localY + 1, localZ - 1)] != BlockData.BlockType.Air
+                            );
+                        case 4:
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX, localY + 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY + 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY, localZ - 1)] != BlockData.BlockType.Air
+                            );
+                        default:
+                            return 1.0f;
+                    }
 
-            if (_vaoHandle == 0)
+                case BlockData.BlockFace.Back: // +Z face
+                    switch (vertexIndex)
+                    {
+                        case 0: // Bottom-left
+                        case 5:
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX - 1, localY, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY - 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX, localY - 1, localZ + 1)] != BlockData.BlockType.Air
+                            );
+                        case 1: // Bottom-right
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX, localY - 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY - 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY, localZ + 1)] != BlockData.BlockType.Air
+                            );
+                        case 2: // Top-right
+                        case 3: // Top-right (duplicated)
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX + 1, localY, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY + 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX, localY + 1, localZ + 1)] != BlockData.BlockType.Air
+                            );
+                        case 4: // Top-left (duplicated)
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX, localY + 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY + 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY, localZ + 1)] != BlockData.BlockType.Air
+                            );
+                        default:
+                            return 1.0f;
+                    }
+
+                case BlockData.BlockFace.Left: // -X face
+                    switch (vertexIndex)
+                    {
+                        case 0: // Top-back
+                        case 5:
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX - 1, localY + 1, localZ)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY + 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY, localZ + 1)] != BlockData.BlockType.Air
+                            );
+                        case 1: // Top-front
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX - 1, localY + 1, localZ)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY + 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY, localZ - 1)] != BlockData.BlockType.Air
+                            );
+                        case 2: // Bottom-front
+                        case 3:
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX - 1, localY, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY - 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY - 1, localZ)] != BlockData.BlockType.Air
+                            );
+                        case 4: // Bottom back
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX - 1, localY - 1, localZ)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY - 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY, localZ + 1)] != BlockData.BlockType.Air
+                            );
+                        default:
+                            return 1.0f;
+                    }
+
+                case BlockData.BlockFace.Right: // +X face
+                    switch (vertexIndex)
+                    {
+                        case 0: // Top-back
+                        case 5:
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX + 1, localY + 1, localZ)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY + 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY, localZ + 1)] != BlockData.BlockType.Air
+                            );
+                        case 1: // Top-front
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX + 1, localY + 1, localZ)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY + 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY, localZ - 1)] != BlockData.BlockType.Air
+                            );
+                        case 2: // Bottom-front
+                        case 3: // Bottom-front (duplicated)
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX + 1, localY, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY - 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY - 1, localZ)] != BlockData.BlockType.Air
+                            );
+                        case 4: // Bottom-back
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX + 1, localY - 1, localZ)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY - 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY, localZ + 1)] != BlockData.BlockType.Air
+                            );
+                        default:
+                            return 1.0f;
+                    }
+
+                //case BlockData.BlockFace.Bottom: // -Y face
+                //    switch (i)
+                //    {
+                //        case 0: // Front-left
+                //        case 5:
+                //            return CalculateAoForVertex(
+                //                _blocks[GetBlockAt(x - 1, y - 1, z)] != BlockData.BlockType.Air,   // left
+                //                _blocks[GetBlockAt(x - 1, y - 1, z - 1)] != BlockData.BlockType.Air, // left-front corner
+                //                _blocks[GetBlockAt(x, y - 1, z - 1)] != BlockData.BlockType.Air    // front
+                //            );
+                //            break;
+                //        case 1: // Front-right
+                //            return CalculateAoForVertex(
+                //                _blocks[GetBlockAt(x, y - 1, z - 1)] != BlockData.BlockType.Air,   // front
+                //                _blocks[GetBlockAt(x + 1, y - 1, z - 1)] != BlockData.BlockType.Air, // right-front corner
+                //                _blocks[GetBlockAt(x + 1, y - 1, z)] != BlockData.BlockType.Air    // right
+                //            );
+                //            break;
+                //        case 2: // Back-right
+                //        case 3: // Back-right (duplicated)
+                //            return CalculateAoForVertex(
+                //                _blocks[GetBlockAt(x + 1, y - 1, z)] != BlockData.BlockType.Air,   // right
+                //                _blocks[GetBlockAt(x + 1, y - 1, z + 1)] != BlockData.BlockType.Air, // right-back corner
+                //                _blocks[GetBlockAt(x, y - 1, z + 1)] != BlockData.BlockType.Air    // back
+                //            );
+                //            break;
+                //        case 4: // Back-left (duplicated)
+                //            return CalculateAoForVertex(
+                //                _blocks[GetBlockAt(x, y - 1, z + 1)] != BlockData.BlockType.Air,   // back
+                //                _blocks[GetBlockAt(x - 1, y - 1, z + 1)] != BlockData.BlockType.Air, // left-back corner
+                //                _blocks[GetBlockAt(x - 1, y - 1, z)] != BlockData.BlockType.Air    // left
+                //            );
+                //            break;
+                //        default:
+                //            return 3;
+                //            break;
+                //    }
+                //    break;
+
+                case BlockData.BlockFace.Top: // +Y face
+                    switch (vertexIndex)
+                    {
+                        case 0: // Back left
+                        case 5:
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX - 1, localY + 1, localZ)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY + 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX, localY + 1, localZ - 1)] != BlockData.BlockType.Air
+                            );
+                        case 1:
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX, localY + 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY + 1, localZ - 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY + 1, localZ)] != BlockData.BlockType.Air
+                            );
+                        case 2: // Front right (first instance)
+                        case 3:
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX + 1, localY + 1, localZ)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX + 1, localY + 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX, localY + 1, localZ + 1)] != BlockData.BlockType.Air
+                            );
+                        case 4: // Front left
+                            return CalculateAoForVertex(
+                                _blocks[GetBlockAt(localX, localY + 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY + 1, localZ + 1)] != BlockData.BlockType.Air,
+                                _blocks[GetBlockAt(localX - 1, localY + 1, localZ)] != BlockData.BlockType.Air
+                            );
+                        default:
+                            return 1.0f;
+                    }
+
+                default:
+                    return 1.0f; // Default to no occlusion
+            }
+        }
+
+        private float CalculateAoForVertex(bool sideOne, bool corner, bool sideTwo)
+        {
+            if (sideOne && sideTwo)
             {
-                _vaoHandle = GL.GenVertexArray();
+                return 0.75f;
             }
-            GL.BindVertexArray(_vaoHandle);
+            else if ((sideOne && corner) || (sideTwo && corner))
+            {
+                return 0.85f;
+            }
+            else if (sideOne || sideTwo || corner)
+            {
+                return 0.95f;
+            }
+            else {
+                return 1.0f;
+            }
+        }
 
-            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
-            GL.EnableVertexAttribArray(0);
+        public void InitMesh()
+        {
+            _mesh.Init(_vertices.ToArray());
 
-            GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
-            GL.EnableVertexAttribArray(1);
-
-            GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
-            GL.BindVertexArray(0);
+            _vertexCount = _vertices.Count();
+            _vertices.Clear();
         }
 
         public void Render()
         {
-            GL.BindVertexArray(_vaoHandle);
-            GL.DrawArrays(PrimitiveType.Triangles, 0, _vertices.Count() / 6);
-            GL.BindVertexArray(0);
+            _mesh.Render(_vertexCount);
         }
 
         public int GetBlockAt(int x, int y, int z)
@@ -160,24 +393,33 @@ namespace Voxels
             NeedsToBeGenerated = true;
         }
 
-        public static BoundingBox GetBoundingBox(int chunkPosX, int chunkPosZ)
+        public void CalculateBoundBox(Vector2i position)
         {
-            float worldMinX = chunkPosX * ChunkData.Size;
-            float worldMinZ = chunkPosZ * ChunkData.Size;
+            float worldMinX = position.X * ChunkData.Size;
+            float worldMinZ = position.Y * ChunkData.Size;
 
-            Vector3 center = new Vector3(
+            _boundingBox.Center = new Vector3(
                 worldMinX + ChunkData.Size / 2f,
                 0,
                 worldMinZ + ChunkData.Size / 2f
             );
 
-            Vector3 extents = new Vector3(
+            _boundingBox.Extents = new Vector3(
                 ChunkData.Size / 2f,
                 ChunkData.Height / 2f,
                 ChunkData.Size / 2f
             );
+        }
 
-            return new BoundingBox(center, extents);
+        private float GetHeight(FastNoiseLite noise, int x, int z)
+        {
+            float h1 = (noise.GetNoise((float)x, (float)z) + 1) * (ChunkData.GenerationHeight / 2);
+            noise.SetNoiseType(FastNoiseLite.NoiseType.Cellular);
+            noise.SetFractalType(FastNoiseLite.FractalType.FBm);
+            noise.SetFrequency(0.005f);
+            float h2 = (noise.GetNoise((float)x, (float)z) + 1) * (ChunkData.GenerationHeight / 32);
+
+            return h1 + h2;
         }
     }
 }

@@ -19,7 +19,7 @@ namespace Voxels
             _noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2S);
             _noise.SetFractalOctaves(8);
 
-            for (int i = 0; i < 250; i++)
+            for (int i = 0; i < 500; i++)
             {
                 _chunkPool.Enqueue(new Chunk());
             }
@@ -56,19 +56,24 @@ namespace Voxels
                 }
             }
 
-            Parallel.ForEach(_chunksToGenerate, chunk =>
+            List<Chunk> toGenerate = new();
+            while (_chunksToGenerate.TryDequeue(out var chunk))
+            {
+                toGenerate.Add(chunk);
+            }
+
+            Parallel.ForEach(toGenerate, chunk =>
             {
                 chunk.Generate(_noise);
+                chunk.GenerateMesh();
                 _chunksToRender.TryAdd(chunk.Position, chunk);
-                _chunksToGenerate.TryDequeue(out _);
             });
 
             foreach (var chunk in _chunksToRender.Values)
             {
                 if (chunk.NeedsToBeMeshed)
                 {
-                    chunk.GenerateMesh();
-                    chunk.UploadMesh();
+                    chunk.InitMesh();
                     chunk.NeedsToBeMeshed = false;
                 }
             }
@@ -88,6 +93,8 @@ namespace Voxels
 
         public void UnloadOutOfRangeChunks(int startX, int endX, int startZ, int endZ)
         {
+            List<Vector2i> chunksToRemove = new();
+
             foreach (var chunk in _chunksToRender)
             {
                 Vector2i pos = chunk.Key;
@@ -96,24 +103,31 @@ namespace Voxels
                 {
                     chunk.Value.Clear();
                     _chunkPool.Enqueue(chunk.Value);
-                    _chunksToRender.Remove(pos, out var _);
+                    chunksToRemove.Add(pos);
                 }
             }
+
+            Parallel.ForEach(chunksToRemove, pos =>
+            {
+                _chunksToRender.Remove(pos, out _);
+            });
         }
 
         public void Render(Camera camera)
         {
             int renderedCount = 0;
 
-            foreach (var chunk in _chunksToRender)
+            foreach (var kvp in _chunksToRender)
             {
-                if (camera.BoundingBoxInFrustum(Chunk.GetBoundingBox(chunk.Key.X, chunk.Key.Y)))
+                var chunk = kvp.Value;
+
+                if (camera.BoundingBoxInFrustum(chunk.BoundingBox))
                 {
                     renderedCount++;
-                    chunk.Value.Render();
+                    chunk.Render();
                 }
             }
-            Console.WriteLine($"{renderedCount} out of {_chunksToRender.Count} rendered");
+            //Console.WriteLine($"{renderedCount} out of {_chunksToRender.Count} rendered");
         }
     }
 }

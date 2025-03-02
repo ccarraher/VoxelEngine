@@ -39,10 +39,9 @@ namespace Voxels
             _player.Init();
             _world.Init();
 
-            //GL.Enable(EnableCap.DepthTest);
             //GL.DebugMessageCallback(DebugMessageDelegate, IntPtr.Zero);
-            VSync = VSyncMode.Adaptive;
-            GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
+            //VSync = VSyncMode.Adaptive;
+            //GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
             GL.ClearColor(new Color4(0.2f, 0.3f, 0.3f, 1.0f));
             GL.Enable(EnableCap.DepthTest);
             CursorState = CursorState.Grabbed;
@@ -113,6 +112,13 @@ namespace Voxels
 
         //    GL.Viewport(0, 0, FramebufferSize.X, FramebufferSize.Y);
         //}
+
+        protected override void OnMouseWheel(MouseWheelEventArgs e)
+        {
+            base.OnMouseWheel(e);
+
+            _camera.UpdateFollowRadius(e.OffsetY);
+        }
 
         private static void OnDebugMessage(
             DebugSource source,

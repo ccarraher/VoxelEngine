@@ -49,21 +49,23 @@ namespace Voxels
         {
             foreach (var plane in FrustumPlanes)
             {
-                // Check if the AABB is fully outside the frustum for this plane
                 Vector3 absNormal = new Vector3(MathF.Abs(plane.Normal.X), MathF.Abs(plane.Normal.Y), MathF.Abs(plane.Normal.Z));
 
-                float distance = plane.DistanceTo(box.Center);  // Distance to the AABB's center
+                float distance = plane.DistanceTo(box.Center);
                 float projection = box.Extents.X * absNormal.X + box.Extents.Y * absNormal.Y + box.Extents.Z * absNormal.Z;
 
-                // If the distance to the center is negative, the box is outside the frustum.
-                // If the absolute projection distance is greater than the distance to the plane, it's outside.
                 if (distance + projection < 0)
                 {
-                    return false; // AABB is outside the frustum for this plane
+                    return false;
                 }
             }
 
-            return true; // The box is either inside or intersecting the frustum
+            return true;
+        }
+
+        public void UpdateFollowRadius(float offset)
+        {
+            _followRadius = MathHelper.Clamp(_followRadius - offset, 10, 50);
         }
 
         private void ProcessMouseMovement(Vector2 mousePosition)
@@ -108,7 +110,6 @@ namespace Voxels
         {
             Matrix4 vp = GetViewMatrix() * GetProjectionMatrix();
 
-            // Extract planes from view-projection matrix=
             // Left plane
             FrustumPlanes[1] = new Plane(new Vector4(
                 vp.M14 + vp.M11, vp.M24 + vp.M21, vp.M34 + vp.M31, vp.M44 + vp.M41));
